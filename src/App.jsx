@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   MessageSquare, 
   Search, 
@@ -29,6 +29,12 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+// ─── Static style objects (defined once, reused across renders) ──────────────
+const bulletDotStyle = { color: 'var(--accent-saffron)', marginRight: '0.35rem', fontWeight: 'bold' };
+const numberedPrefixStyle = { color: 'var(--secondary-color)', fontWeight: '700', marginRight: '0.35rem' };
+const emptyLineStyle = { minHeight: '0.75rem', marginBottom: '0.35rem' };
+const normalLineStyle = { minHeight: 'auto', marginBottom: '0.35rem' };
+
 /**
  * Renders parsed markdown lines from helpers.parseMarkdown as JSX.
  * Keeps JSX-specific rendering here while pure parsing logic lives in helpers.js.
@@ -37,7 +43,6 @@ const renderMessageText = (text) => {
   if (!text) return null;
 
   return parseMarkdown(text).map((line, lineIdx) => {
-    // Convert segments array to JSX spans
     const parts = line.segments.map((seg, segIdx) =>
       seg.bold
         ? <strong key={segIdx}>{seg.text}</strong>
@@ -47,7 +52,7 @@ const renderMessageText = (text) => {
     if (line.type === 'bullet') {
       return (
         <div key={lineIdx} style={{ paddingLeft: `${(line.indent * 0.5) + 1.25}rem`, textIndent: '-0.85rem', marginBottom: '0.35rem' }}>
-          <span style={{ color: 'var(--accent-saffron)', marginRight: '0.35rem', fontWeight: 'bold' }}>•</span>
+          <span style={bulletDotStyle}>•</span>
           {parts}
         </div>
       );
@@ -56,7 +61,7 @@ const renderMessageText = (text) => {
     if (line.type === 'numbered') {
       return (
         <div key={lineIdx} style={{ paddingLeft: `${(line.indent * 0.5) + 1.5}rem`, textIndent: '-1.1rem', marginBottom: '0.35rem' }}>
-          <span style={{ color: 'var(--secondary-color)', fontWeight: '700', marginRight: '0.35rem' }}>{line.numPrefix}</span>
+          <span style={numberedPrefixStyle}>{line.numPrefix}</span>
           {parts}
         </div>
       );
@@ -64,22 +69,75 @@ const renderMessageText = (text) => {
 
     const rawLine = line.segments.map(s => s.text).join('');
     return (
-      <div key={lineIdx} style={{ minHeight: rawLine.trim() === '' ? '0.75rem' : 'auto', marginBottom: '0.35rem' }}>
+      <div key={lineIdx} style={rawLine.trim() === '' ? emptyLineStyle : normalLineStyle}>
         {parts}
       </div>
     );
   });
 };
 
+// ─── Static data (never changes, no need to recreate per render) ─────────────
+
+const SEND_COOLDOWN_MS = 2000;
+
+const WELCOME_MESSAGE = {
+  id: 'welcome',
+  sender: 'assistant',
+  text: "\u0928\u092E\u0938\u094D\u0924\u0947! \u092E\u0948\u0902 \u0938\u094D\u092E\u093E\u0930\u094D\u091F \u092D\u093E\u0930\u0924 \u0928\u093E\u0917\u0930\u093F\u0915 \u0938\u0939\u093E\u092F\u0915 \u0939\u0942\u0901\u0964 \u092E\u0948\u0902 \u0906\u0927\u093E\u0930 \u0905\u092A\u0921\u0947\u091F, \u0930\u093E\u0936\u0928 \u0915\u093E\u0930\u094D\u0921, \u091C\u0928\u094D\u092E \u092A\u094D\u0930\u092E\u093E\u0923 \u092A\u0924\u094D\u0930 \u091C\u0948\u0938\u0940 \u0938\u0930\u0915\u093E\u0930\u0940 \u0938\u0947\u0935\u093E\u0913\u0902 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902 \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0926\u0947\u0928\u0947 \u092F\u093E \u0906\u092A\u0915\u0940 \u0936\u093F\u0915\u093E\u092F\u0924 \u0926\u0930\u094D\u091C \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u092E\u0926\u0926 \u0915\u0930 \u0938\u0915\u0924\u093E \u0939\u0942\u0901\u0964 \u0906\u092A \u0939\u093F\u0902\u0926\u0940 \u092F\u093E \u0905\u0902\u0917\u094D\u0930\u0947\u091C\u0940 \u092E\u0947\u0902 \u0932\u093F\u0916 \u0938\u0915\u0924\u0947 \u0939\u0948\u0902\u0964\n\nHello! I am the Smart Bharat Civic Assistant. I can help you with information about government services (Aadhaar, Ration Card, Birth Certificate) or register a civic complaint (Water bill, road damage). You can type in Hindi or English.",
+  timestamp: null // will be set in lazy initializer
+};
+
+const QUICK_PROMPTS = [
+  { text: "Aadhaar Card update documents", icon: "\uD83D\uDCC7" },
+  { text: "\u0906\u0927\u093E\u0930 \u0938\u0941\u0927\u093E\u0930 \u0915\u0947 \u0926\u0938\u094D\u0924\u093E\u0935\u0947\u091C\u093C", icon: "\uD83D\uDCC7" },
+  { text: "Ration card process", icon: "\uD83C\uDF3E" },
+  { text: "File road damage complaint", icon: "\uD83D\uDEE3\uFE0F" },
+  { text: "\u092A\u093E\u0928\u0940 \u0915\u093E \u092C\u093F\u0932 \u092C\u0939\u0941\u0924 \u091C\u093C\u094D\u092F\u093E\u0926\u093E \u0906\u092F\u093E \u0939\u0948", icon: "\uD83D\uDCA7" }
+];
+
+const SERVICES_LIST = [
+  {
+    title: "Aadhaar Card (\u0906\u0927\u093E\u0930 \u0915\u093E\u0930\u094D\u0921)",
+    subtitle: "UIDAI Civic Identity",
+    desc: "Information regarding updating your demographic details (Name, Address, DOB, Gender, Mobile Number) or biometric data.",
+    docs: ["Proof of Identity (PAN, Passport)", "Proof of Address (Electricity bill, Bank passbook)", "Date of Birth proof"],
+    icon: "\uD83D\uDCC7"
+  },
+  {
+    title: "Ration Card (\u0930\u093E\u0936\u0928 \u0915\u093E\u0930\u094D\u0921)",
+    subtitle: "Food Security & Supplies",
+    desc: "Apply for a new Ration Card or update existing household member information under your state food supplies portal.",
+    docs: ["Aadhaar cards of all members", "Passport size photo of Head of Family", "Income Certificate", "Residence proof"],
+    icon: "\uD83C\uDF3E"
+  },
+  {
+    title: "Birth Certificate (\u091C\u0928\u094D\u092E \u092A\u094D\u0930\u092E\u093E\u0923 \u092A\u0924\u094D\u0930)",
+    subtitle: "Registrar of Births & Deaths",
+    desc: "Register a child's birth within 21 days at the municipal office or Panchayat block to obtain the legal certificate.",
+    docs: ["Hospital birth record slip", "Parents' Identity proofs (Aadhaar/Voter ID)", "Address proof of parents"],
+    icon: "\uD83D\uDC76"
+  },
+  {
+    title: "Water Services (\u091C\u0932 \u0906\u092A\u0942\u0930\u094D\u0924\u093F \u0914\u0930 \u0936\u093F\u0915\u093E\u092F\u0924)",
+    subtitle: "Municipal Water Board",
+    desc: "File complaints regarding pipe leakage, contaminated water supply, sewage problems, or incorrect billing calculations.",
+    docs: ["Previous water bill", "Consumer Connection ID", "Photo of damage/leakage (optional)"],
+    icon: "\uD83D\uDCA7"
+  },
+  {
+    title: "Roads & Infrastructure (\u0938\u0921\u093C\u0915 \u090F\u0935\u0902 \u092C\u0941\u0928\u093F\u092F\u093E\u0926\u0940 \u0922\u093E\u0902\u091A\u093E)",
+    subtitle: "Public Works Department (PWD)",
+    desc: "File immediate complaints regarding severe potholes, broken pavement, street light failures, or drainage overflow on public roads.",
+    docs: ["Location coordinates/Address", "Photos of road damage", "Citizen ID Proof"],
+    icon: "\uD83D\uDEE3\uFE0F"
+  }
+];
+
 function App() {
   const [activeTab, setActiveTab] = useState('chat');
-  const [messages, setMessages] = useState([
-    {
-      id: 'welcome',
-      sender: 'assistant',
-      text: "नमस्ते! मैं स्मार्ट भारत नागरिक सहायक हूँ। मैं आधार अपडेट, राशन कार्ड, जन्म प्रमाण पत्र जैसी सरकारी सेवाओं के बारे में जानकारी देने या आपकी शिकायत दर्ज करने में मदद कर सकता हूँ। आप हिंदी या अंग्रेजी में लिख सकते हैं।\n\nHello! I am the Smart Bharat Civic Assistant. I can help you with information about government services (Aadhaar, Ration Card, Birth Certificate) or register a civic complaint (Water bill, road damage). You can type in Hindi or English.",
-      timestamp: new Date()
-    }
+  // Lazy initializer: the welcome message object is created only once
+  const [messages, setMessages] = useState(() => [
+    { ...WELCOME_MESSAGE, timestamp: new Date() }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -97,20 +155,19 @@ function App() {
   }, [messages, isLoading]);
 
   // Handle copying tracking ID
-  const copyToClipboard = (text) => {
+  const copyToClipboard = useCallback((text) => {
     navigator.clipboard.writeText(text);
     setCopySuccessId(text);
     setTimeout(() => setCopySuccessId(null), 2000);
-  };
+  }, []);
 
   // generateTrackingId is imported from src/utils/helpers.js
 
-  // Client-side rate limiting: minimum 2-second gap between sends
+  // Client-side rate limiting
   const lastSendTimeRef = useRef(0);
-  const SEND_COOLDOWN_MS = 2000;
 
   // Send message handler
-  const handleSendMessage = async (textToSend) => {
+  const handleSendMessage = useCallback(async (textToSend) => {
     const rawText = textToSend || inputValue;
     if (!rawText.trim()) return;
 
@@ -227,10 +284,10 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [inputValue]);
 
   // Search tracking ID
-  const handleSearchComplaint = async (e) => {
+  const handleSearchComplaint = useCallback(async (e) => {
     if (e) e.preventDefault();
     if (!searchId.trim()) return;
 
@@ -290,10 +347,10 @@ function App() {
     } finally {
       setSearchLoading(false);
     }
-  };
+  }, [searchId]);
 
   // Status progression tool for Mock Mode evaluations
-  const handleUpdateStatus = (newStatus) => {
+  const handleUpdateStatus = useCallback((newStatus) => {
     if (!searchResult) return;
     
     const updated = { ...searchResult, status: newStatus };
@@ -307,59 +364,10 @@ function App() {
         localStorage.setItem('smart_bharat_complaints', JSON.stringify(localComplaints));
       }
     } else {
-      // Update in Firestore
       const docRef = doc(db, 'complaints', searchResult.trackingId.toUpperCase());
       setDoc(docRef, { status: newStatus }, { merge: true }).catch(console.error);
     }
-  };
-
-  // Quick prompt chips
-  const quickPrompts = [
-    { text: "Aadhaar Card update documents", icon: "📇" },
-    { text: "आधार सुधार के दस्तावेज़", icon: "📇" },
-    { text: "Ration card process", icon: "🌾" },
-    { text: "File road damage complaint", icon: "🛣️" },
-    { text: "पानी का बिल बहुत ज़्यादा आया है", icon: "💧" }
-  ];
-
-  // Services Directory Data
-  const servicesList = [
-    {
-      title: "Aadhaar Card (आधार कार्ड)",
-      subtitle: "UIDAI Civic Identity",
-      desc: "Information regarding updating your demographic details (Name, Address, DOB, Gender, Mobile Number) or biometric data.",
-      docs: ["Proof of Identity (PAN, Passport)", "Proof of Address (Electricity bill, Bank passbook)", "Date of Birth proof"],
-      icon: "📇"
-    },
-    {
-      title: "Ration Card (राशन कार्ड)",
-      subtitle: "Food Security & Supplies",
-      desc: "Apply for a new Ration Card or update existing household member information under your state food supplies portal.",
-      docs: ["Aadhaar cards of all members", "Passport size photo of Head of Family", "Income Certificate", "Residence proof"],
-      icon: "🌾"
-    },
-    {
-      title: "Birth Certificate (जन्म प्रमाण पत्र)",
-      subtitle: "Registrar of Births & Deaths",
-      desc: "Register a child's birth within 21 days at the municipal office or Panchayat block to obtain the legal certificate.",
-      docs: ["Hospital birth record slip", "Parents' Identity proofs (Aadhaar/Voter ID)", "Address proof of parents"],
-      icon: "👶"
-    },
-    {
-      title: "Water Services (जल आपूर्ति और शिकायत)",
-      subtitle: "Municipal Water Board",
-      desc: "File complaints regarding pipe leakage, contaminated water supply, sewage problems, or incorrect billing calculations.",
-      docs: ["Previous water bill", "Consumer Connection ID", "Photo of damage/leakage (optional)"],
-      icon: "💧"
-    },
-    {
-      title: "Roads & Infrastructure (सड़क एवं बुनियादी ढांचा)",
-      subtitle: "Public Works Department (PWD)",
-      desc: "File immediate complaints regarding severe potholes, broken pavement, street light failures, or drainage overflow on public roads.",
-      docs: ["Location coordinates/Address", "Photos of road damage", "Citizen ID Proof"],
-      icon: "🛣️"
-    }
-  ];
+  }, [searchResult]);
 
   return (
     <>
@@ -530,7 +538,7 @@ function App() {
                 role="group"
                 aria-label="Quick query suggestions"
               >
-                {quickPrompts.map((prompt, idx) => (
+                {QUICK_PROMPTS.map((prompt, idx) => (
                   <button
                     key={idx}
                     className="quick-prompt-tag"
@@ -736,7 +744,7 @@ function App() {
               </div>
 
               <div className="directory-grid">
-                {servicesList.map((svc, idx) => (
+                {SERVICES_LIST.map((svc, idx) => (
                   <div key={idx} className="directory-card" aria-label={`Service: ${svc.title}`}>
                     <div className="directory-card-header">
                       <div className="directory-card-icon" style={{ fontSize: '1.5rem' }} aria-hidden="true">{svc.icon}</div>
