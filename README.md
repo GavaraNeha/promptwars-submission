@@ -1,16 +1,21 @@
-# React + Vite
+Get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey), and set up a Firebase project with Firestore enabled at [Firebase Console](https://console.firebase.google.com).
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+### 4. Run the development server
+```bash
+npm run dev
+```
 
-Currently, two official plugins are available:
+The app will be available at `http://localhost:5173`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### 5. Build for production
+```bash
+npm run build
+```
 
-## React Compiler
+## 📝 About This Project
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Built for **DEVENGERS PromptWars 2026** under the challenge theme *"Smart Bharat – AI-Powered Civic Companion."* The goal was to promote transparency, accessibility, and digital inclusion in everyday civic interactions through a fast, GenAI-powered platform.
 
-## Expanding the Oxlint configuration
+## 🤝 Built With
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Google Antigravity, Gemini API, and Firebase — built and deployed in a single 4-hour hackathon sprint.
