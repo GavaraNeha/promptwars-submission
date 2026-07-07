@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+import { sanitizeQuery } from '../utils/sanitize';
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 let genAI = null;
@@ -117,29 +118,86 @@ const mockAnalyzeQuery = (query) => {
   };
 };
 
+/** Gemini safety settings — block medium-and-above harmful content. */
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+];
+
+/**
+ * Validate the parsed Gemini response has the expected shape.
+ * Returns a safe default if the schema is unexpected.
+ */
+function validateResponse(parsed, originalQuery) {
+  const validClassifications = ['information', 'complaint'];
+  const validLanguages = ['Hindi', 'English'];
+  const validCategories = ['Aadhaar update', 'ration card', 'birth certificate', 'water bill complaint', 'road damage complaint', 'other'];
+
+  if (!parsed || typeof parsed !== 'object') return null;
+  if (!validClassifications.includes(parsed.classification)) return null;
+  if (typeof parsed.response !== 'string' || parsed.response.length === 0) return null;
+
+  // Coerce fields to valid values
+  if (!validLanguages.includes(parsed.language)) parsed.language = 'English';
+  if (!validCategories.includes(parsed.category)) parsed.category = 'other';
+
+  // Ensure complaintDetails exists for complaints
+  if (parsed.classification === 'complaint') {
+    if (!parsed.complaintDetails || typeof parsed.complaintDetails !== 'object') {
+      parsed.complaintDetails = { title: `Complaint: ${parsed.category}`, description: originalQuery };
+    }
+  }
+
+  return parsed;
+}
+
 export async function analyzeQuery(query) {
+  // Sanitize user input before processing
+  const { valid, sanitized, error } = sanitizeQuery(query);
+  if (!valid) {
+    // Return a mock error response if input is invalid
+    return {
+      language: 'English',
+      classification: 'information',
+      category: 'other',
+      response: error || 'Invalid input. Please try again with a valid message.',
+      complaintDetails: { title: '', description: '' }
+    };
+  }
+
   if (isGeminiMock) {
-    // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    return mockAnalyzeQuery(query);
+    return mockAnalyzeQuery(sanitized);
   }
 
   try {
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
       systemInstruction: SYSTEM_INSTRUCTION,
+      safetySettings,
       generationConfig: {
         responseMimeType: "application/json"
       }
     });
 
-    const result = await model.generateContent(query);
+    const result = await model.generateContent(sanitized);
     const text = result.response.text();
-    console.log("Gemini Raw Response:", text);
-    return JSON.parse(text);
+    // Only log response length in production, not the full content
+    console.debug(`Gemini response received (${text.length} chars)`);
+    const parsed = JSON.parse(text);
+    const validated = validateResponse(parsed, sanitized);
+
+    if (!validated) {
+      console.warn('Gemini response failed schema validation, falling back to local analyzer.');
+      return mockAnalyzeQuery(sanitized);
+    }
+
+    return validated;
   } catch (error) {
-    console.error("Gemini API error, falling back to local analyzer:", error);
-    return mockAnalyzeQuery(query);
+    console.error("Gemini API error, falling back to local analyzer:", error.message);
+    return mockAnalyzeQuery(sanitized);
   }
 }
 export { isGeminiMock };

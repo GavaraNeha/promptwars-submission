@@ -1,0 +1,72 @@
+rules_version = '2';
+
+// Firestore Security Rules for Smart Bharat Civic Assistant
+// Deploy these rules via the Firebase Console or CLI:
+//   firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── complaints collection ───────────────────────────────────────
+    match /complaints/{ticketId} {
+
+      // Anyone can read a complaint by its tracking ID (for status lookup).
+      // This is intentional — tracking IDs are random 36^6 ≈ 2.2B combinations,
+      // providing security-through-obscurity similar to shareable links.
+      allow read: if true;
+
+      // Anyone can CREATE a new complaint (no auth required for civic filing).
+      // Enforce field validation on write:
+      allow create: if
+        // Document ID must match the SB-XXXXXX pattern
+        ticketId.matches('^SB-[A-Z0-9]{6}$')
+
+        // Required fields must exist and be strings
+        && request.resource.data.keys().hasAll([
+          'trackingId', 'query', 'title', 'description',
+          'category', 'language', 'status', 'createdAt'
+        ])
+
+        // trackingId in the body must match the document ID
+        && request.resource.data.trackingId == ticketId
+
+        // Status on creation must always be "Submitted"
+        && request.resource.data.status == 'Submitted'
+
+        // category must be from the allowed set
+        && request.resource.data.category in [
+          'Aadhaar update', 'ration card', 'birth certificate',
+          'water bill complaint', 'road damage complaint', 'other'
+        ]
+
+        // language must be Hindi or English
+        && request.resource.data.language in ['Hindi', 'English']
+
+        // Enforce maximum field lengths to prevent abuse
+        && request.resource.data.query is string
+        && request.resource.data.query.size() <= 1000
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 2000;
+
+      // Only allow updating the 'status' field (for evaluator/admin use).
+      // In production, this should be restricted to authenticated admins.
+      allow update: if
+        // Only the status field is being changed
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+
+        // Status must be a valid progression value
+        && request.resource.data.status in ['Submitted', 'Reviewing', 'Resolved'];
+
+      // Deletes are not permitted from the client
+      allow delete: if false;
+    }
+
+    // ─── Default deny ────────────────────────────────────────────────
+    // All other collections are fully locked down.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

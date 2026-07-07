@@ -17,6 +17,7 @@ import {
 import { db, isMock } from './config/firebase';
 import { analyzeQuery } from './config/gemini';
 import { generateTrackingId, parseMarkdown } from './utils/helpers';
+import { sanitizeQuery, sanitizeTrackingId, sanitizeForFirestore } from './utils/sanitize';
 import { 
   collection, 
   doc, 
@@ -104,13 +105,34 @@ function App() {
 
   // generateTrackingId is imported from src/utils/helpers.js
 
+  // Client-side rate limiting: minimum 2-second gap between sends
+  const lastSendTimeRef = useRef(0);
+  const SEND_COOLDOWN_MS = 2000;
+
   // Send message handler
   const handleSendMessage = async (textToSend) => {
-    const text = textToSend || inputValue;
-    if (!text.trim()) return;
+    const rawText = textToSend || inputValue;
+    if (!rawText.trim()) return;
+
+    // Rate limiting: prevent rapid-fire sends
+    const now = Date.now();
+    if (now - lastSendTimeRef.current < SEND_COOLDOWN_MS) return;
+    lastSendTimeRef.current = now;
 
     // Reset input
     if (!textToSend) setInputValue('');
+
+    // Input validation (sanitizeQuery strips HTML, control chars, enforces length)
+    const { valid, sanitized: text, error: sanitizeError } = sanitizeQuery(rawText);
+    if (!valid) {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        sender: 'assistant',
+        text: sanitizeError || 'Your message could not be processed. Please try again.',
+        timestamp: new Date()
+      }]);
+      return;
+    }
 
     const userMessageId = Date.now().toString();
     const newUserMessage = {
@@ -124,24 +146,28 @@ function App() {
     setIsLoading(true);
 
     try {
-      // Analyze with Gemini
+      // Analyze with Gemini (query is already sanitized inside analyzeQuery too)
       const analysis = await analyzeQuery(text);
       const trackingId = analysis.classification === 'complaint' ? generateTrackingId() : null;
 
       let complaintSaved = false;
 
       if (analysis.classification === 'complaint') {
-        const title = analysis.complaintDetails?.title || `Complaint: ${analysis.category}`;
-        const description = analysis.complaintDetails?.description || text;
-        const category = analysis.category;
-        const language = analysis.language || 'English';
+        // Sanitize all fields before writing to Firestore / localStorage
+        const title = sanitizeForFirestore(
+          analysis.complaintDetails?.title || `Complaint: ${analysis.category}`, 200
+        );
+        const description = sanitizeForFirestore(
+          analysis.complaintDetails?.description || text, 2000
+        );
+        const category = sanitizeForFirestore(analysis.category, 50);
+        const language = analysis.language === 'Hindi' ? 'Hindi' : 'English';
 
         if (isMock) {
-          // Save to local storage
           const localComplaints = JSON.parse(localStorage.getItem('smart_bharat_complaints') || '[]');
           const newComplaint = {
             trackingId,
-            query: text,
+            query: sanitizeForFirestore(text, 1000),
             title,
             description,
             category,
@@ -153,11 +179,10 @@ function App() {
           localStorage.setItem('smart_bharat_complaints', JSON.stringify(localComplaints));
           complaintSaved = true;
         } else {
-          // Save to Firestore
           const ticketRef = doc(db, 'complaints', trackingId);
           await setDoc(ticketRef, {
             trackingId,
-            query: text,
+            query: sanitizeForFirestore(text, 1000),
             title,
             description,
             category,
@@ -213,34 +238,38 @@ function App() {
     setSearchError('');
     setSearchResult(null);
 
-    const targetId = searchId.toUpperCase().trim();
+    // Validate tracking ID format before querying
+    const { valid, trackingId: targetId, error: idError } = sanitizeTrackingId(searchId);
+    if (!valid) {
+      setSearchError(idError);
+      setSearchLoading(false);
+      return;
+    }
 
     try {
       if (isMock) {
-        // Fetch from LocalStorage
         const localComplaints = JSON.parse(localStorage.getItem('smart_bharat_complaints') || '[]');
         const found = localComplaints.find(c => c.trackingId.toUpperCase() === targetId);
         
         if (found) {
           setSearchResult(found);
         } else {
-          setSearchError('No complaint found with this Tracking ID. / इस ट्रैकिंग आईडी के साथ कोई शिकायत नहीं मिली।');
+          setSearchError('No complaint found with this Tracking ID. / \u0907\u0938 \u091F\u094D\u0930\u0948\u0915\u093F\u0902\u0917 \u0906\u0908\u0921\u0940 \u0915\u0947 \u0938\u093E\u0925 \u0915\u094B\u0908 \u0936\u093F\u0915\u093E\u092F\u0924 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u0940\u0964');
         }
       } else {
-        // Fetch from Firestore
+        // Fetch from Firestore — targetId is already validated as SB-XXXXXX
         const docRef = doc(db, 'complaints', targetId);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          // Map firestore timestamp to readable string
           const dateStr = data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString();
           setSearchResult({
             ...data,
             createdAt: dateStr
           });
         } else {
-          // Try search by query filter just in case doc ID doesn't match
+          // Fallback: search by field in case doc ID doesn't match
           const q = query(collection(db, 'complaints'), where('trackingId', '==', targetId));
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
@@ -251,13 +280,13 @@ function App() {
               createdAt: dateStr
             });
           } else {
-            setSearchError('No complaint found with this Tracking ID. / इस ट्रैकिंग आईडी के साथ कोई शिकायत नहीं मिली।');
+            setSearchError('No complaint found with this Tracking ID. / \u0907\u0938 \u091F\u094D\u0930\u0948\u0915\u093F\u0902\u0917 \u0906\u0908\u0921\u0940 \u0915\u0947 \u0938\u093E\u0925 \u0915\u094B\u0908 \u0936\u093F\u0915\u093E\u092F\u0924 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u0940\u0964');
           }
         }
       }
     } catch (err) {
-      console.error("Search error:", err);
-      setSearchError('Failed to search complaint. Please check your network. / शिकायत खोजने में विफल। कृपया अपना नेटवर्क जांचें।');
+      console.error("Search error:", err.message);
+      setSearchError('Failed to search complaint. Please check your network. / \u0936\u093F\u0915\u093E\u092F\u0924 \u0916\u094B\u091C\u0928\u0947 \u092E\u0947\u0902 \u0935\u093F\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u0905\u092A\u0928\u093E \u0928\u0947\u091F\u0935\u0930\u094D\u0915 \u091C\u093E\u0902\u091A\u0947\u0902\u0964');
     } finally {
       setSearchLoading(false);
     }
