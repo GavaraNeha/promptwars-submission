@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { db, isMock } from './config/firebase';
 import { analyzeQuery } from './config/gemini';
+import { generateTrackingId, parseMarkdown } from './utils/helpers';
 import { 
   collection, 
   doc, 
@@ -27,71 +28,42 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+/**
+ * Renders parsed markdown lines from helpers.parseMarkdown as JSX.
+ * Keeps JSX-specific rendering here while pure parsing logic lives in helpers.js.
+ */
 const renderMessageText = (text) => {
   if (!text) return null;
-  
-  const lines = text.split('\n');
-  
-  return lines.map((line, lineIdx) => {
-    // Check if it's a bullet point
-    const bulletMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
-    const numberedMatch = line.match(/^(\s*)(\d+)\.\s+(.*)/);
-    
-    let content = line;
-    let isBullet = false;
-    let isNumbered = false;
-    let indent = 0;
-    let numPrefix = '';
-    
-    if (bulletMatch) {
-      isBullet = true;
-      content = bulletMatch[2];
-      indent = bulletMatch[1].length;
-    } else if (numberedMatch) {
-      isNumbered = true;
-      content = numberedMatch[3];
-      indent = numberedMatch[1].length;
-      numPrefix = numberedMatch[2] + '.';
-    }
-    
-    // Parse bold tags **text**
-    const parts = [];
-    let lastIndex = 0;
-    const boldRegex = /\*\*(.*?)\*\*/g;
-    let match;
-    
-    while ((match = boldRegex.exec(content)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push(content.substring(lastIndex, match.index));
-      }
-      parts.push(<strong key={match.index}>{match[1]}</strong>);
-      lastIndex = boldRegex.lastIndex;
-    }
-    
-    if (lastIndex < content.length) {
-      parts.push(content.substring(lastIndex));
-    }
-    
-    if (isBullet) {
+
+  return parseMarkdown(text).map((line, lineIdx) => {
+    // Convert segments array to JSX spans
+    const parts = line.segments.map((seg, segIdx) =>
+      seg.bold
+        ? <strong key={segIdx}>{seg.text}</strong>
+        : <span key={segIdx}>{seg.text}</span>
+    );
+
+    if (line.type === 'bullet') {
       return (
-        <div key={lineIdx} style={{ paddingLeft: `${(indent * 0.5) + 1.25}rem`, textIndent: '-0.85rem', marginBottom: '0.35rem' }}>
+        <div key={lineIdx} style={{ paddingLeft: `${(line.indent * 0.5) + 1.25}rem`, textIndent: '-0.85rem', marginBottom: '0.35rem' }}>
           <span style={{ color: 'var(--accent-saffron)', marginRight: '0.35rem', fontWeight: 'bold' }}>•</span>
           {parts}
         </div>
       );
     }
-    
-    if (isNumbered) {
+
+    if (line.type === 'numbered') {
       return (
-        <div key={lineIdx} style={{ paddingLeft: `${(indent * 0.5) + 1.5}rem`, textIndent: '-1.1rem', marginBottom: '0.35rem' }}>
-          <span style={{ color: 'var(--secondary-color)', fontWeight: '700', marginRight: '0.35rem' }}>{numPrefix}</span>
+        <div key={lineIdx} style={{ paddingLeft: `${(line.indent * 0.5) + 1.5}rem`, textIndent: '-1.1rem', marginBottom: '0.35rem' }}>
+          <span style={{ color: 'var(--secondary-color)', fontWeight: '700', marginRight: '0.35rem' }}>{line.numPrefix}</span>
           {parts}
         </div>
       );
     }
-    
+
+    const rawLine = line.segments.map(s => s.text).join('');
     return (
-      <div key={lineIdx} style={{ minHeight: line.trim() === '' ? '0.75rem' : 'auto', marginBottom: '0.35rem' }}>
+      <div key={lineIdx} style={{ minHeight: rawLine.trim() === '' ? '0.75rem' : 'auto', marginBottom: '0.35rem' }}>
         {parts}
       </div>
     );
@@ -130,15 +102,7 @@ function App() {
     setTimeout(() => setCopySuccessId(null), 2000);
   };
 
-  // Generate a random tracking ID (e.g. SB-12A49X)
-  const generateTrackingId = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return `SB-${result}`;
-  };
+  // generateTrackingId is imported from src/utils/helpers.js
 
   // Send message handler
   const handleSendMessage = async (textToSend) => {
