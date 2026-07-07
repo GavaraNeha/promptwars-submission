@@ -336,8 +336,8 @@ function App() {
     <>
       {/* Mock Mode Alert Banner */}
       {isMock && (
-        <div className="mock-banner">
-          <AlertCircle size={16} />
+        <div className="mock-banner" role="status" aria-live="polite">
+          <AlertCircle size={16} aria-hidden="true" />
           <span>
             <strong>Demo Mode:</strong> Firebase configuration is not set. Saving complaints to Local Browser Storage. Set up <code>.env</code> file for live Firestore syncing.
           </span>
@@ -364,26 +364,38 @@ function App() {
       {/* Main Area */}
       <main className="main-container">
         {/* Navigation Tabs */}
-        <nav className="navigation-tabs">
-          <button 
+        <nav className="navigation-tabs" role="tablist" aria-label="Main sections">
+          <button
+            role="tab"
+            aria-selected={activeTab === 'chat'}
+            aria-controls="panel-chat"
+            id="tab-chat"
             className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
             onClick={() => setActiveTab('chat')}
           >
-            <MessageSquare size={18} />
+            <MessageSquare size={18} aria-hidden="true" />
             <span>सहायक (Chat Assistant)</span>
           </button>
-          <button 
+          <button
+            role="tab"
+            aria-selected={activeTab === 'track'}
+            aria-controls="panel-track"
+            id="tab-track"
             className={`tab-btn ${activeTab === 'track' ? 'active' : ''}`}
             onClick={() => setActiveTab('track')}
           >
-            <Search size={18} />
+            <Search size={18} aria-hidden="true" />
             <span>शिकायत ट्रैक करें (Track Complaint)</span>
           </button>
-          <button 
+          <button
+            role="tab"
+            aria-selected={activeTab === 'directory'}
+            aria-controls="panel-directory"
+            id="tab-directory"
             className={`tab-btn ${activeTab === 'directory' ? 'active' : ''}`}
             onClick={() => setActiveTab('directory')}
           >
-            <FileText size={18} />
+            <FileText size={18} aria-hidden="true" />
             <span>सेवा निर्देशिका (Services Info)</span>
           </button>
         </nav>
@@ -391,10 +403,15 @@ function App() {
         {/* Tab Contents */}
         <div className="tab-content">
           {activeTab === 'chat' && (
-            <div className="card chat-container">
+            <div
+              className="card chat-container"
+              id="panel-chat"
+              role="tabpanel"
+              aria-labelledby="tab-chat"
+            >
               <div className="chat-header">
                 <div className="chat-header-info">
-                  <div className="chat-header-avatar">🤖</div>
+                  <div className="chat-header-avatar" aria-hidden="true">🤖</div>
                   <div className="chat-header-text">
                     <h2>Smart Bharat AI</h2>
                     <p>Active to assist you • 24x7</p>
@@ -405,10 +422,21 @@ function App() {
                 </div>
               </div>
 
-              {/* Message List */}
-              <div className="chat-messages">
+              {/* Message List — role=log announces new messages to screen readers */}
+              <div
+                className="chat-messages"
+                role="log"
+                aria-label="Chat conversation"
+                aria-live="polite"
+                aria-relevant="additions"
+              >
                 {messages.map((msg) => (
-                  <div key={msg.id} className={`message-wrapper ${msg.sender}`}>
+                  <div
+                    key={msg.id}
+                    className={`message-wrapper ${msg.sender}`}
+                    role={msg.sender === 'assistant' ? 'article' : undefined}
+                    aria-label={msg.sender === 'assistant' ? 'Smart Bharat AI response' : 'Your message'}
+                  >
                     <div className="message-bubble">
                       {renderMessageText(msg.text)}
 
@@ -417,14 +445,14 @@ function App() {
                         <div className="complaint-card">
                           <div className="complaint-ticket-header">
                             <span>COMPLAINT REGISTERED</span>
-                            <span 
-                              className="ticket-id-badge" 
+                            <button
+                              className="ticket-id-badge"
                               onClick={() => copyToClipboard(msg.trackingId)}
-                              title="Click to copy ID"
+                              aria-label={copySuccessId === msg.trackingId ? `Tracking ID ${msg.trackingId} copied` : `Copy tracking ID ${msg.trackingId}`}
                             >
                               {msg.trackingId}
-                              {copySuccessId === msg.trackingId ? <Check size={14} /> : <Copy size={14} />}
-                            </span>
+                              {copySuccessId === msg.trackingId ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                            </button>
                           </div>
                           <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span>Category: {msg.category}</span>
@@ -432,15 +460,15 @@ function App() {
                               onClick={() => {
                                 setSearchId(msg.trackingId);
                                 setActiveTab('track');
-                                // Trigger search in microtask
                                 setTimeout(() => {
                                   const searchForm = document.getElementById('search-form');
                                   if (searchForm) searchForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
                                 }, 100);
                               }}
+                              aria-label={`Track progress for complaint ${msg.trackingId}`}
                               style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', padding: 0 }}
                             >
-                              Track Progress <ArrowRight size={12} />
+                              Track Progress <ArrowRight size={12} aria-hidden="true" />
                             </button>
                           </div>
                         </div>
@@ -453,80 +481,110 @@ function App() {
                 ))}
 
                 {isLoading && (
-                  <div className="typing-indicator">
-                    <div className="typing-dot"></div>
-                    <div className="typing-dot"></div>
-                    <div className="typing-dot"></div>
+                  <div
+                    className="typing-indicator"
+                    role="status"
+                    aria-label="Smart Bharat AI is thinking"
+                  >
+                    <div className="typing-dot" aria-hidden="true"></div>
+                    <div className="typing-dot" aria-hidden="true"></div>
+                    <div className="typing-dot" aria-hidden="true"></div>
+                    <span className="sr-only">AI is typing a response…</span>
                   </div>
                 )}
                 <div ref={messagesEndRef} />
               </div>
 
               {/* Suggestions */}
-              <div className="quick-prompts-container">
+              <div
+                className="quick-prompts-container"
+                role="group"
+                aria-label="Quick query suggestions"
+              >
                 {quickPrompts.map((prompt, idx) => (
-                  <button 
-                    key={idx} 
+                  <button
+                    key={idx}
                     className="quick-prompt-tag"
                     onClick={() => handleSendMessage(prompt.text)}
                     disabled={isLoading}
+                    aria-label={`Send suggestion: ${prompt.text}`}
                   >
-                    <span>{prompt.icon}</span>
+                    <span aria-hidden="true">{prompt.icon}</span>
                     <span>{prompt.text}</span>
                   </button>
                 ))}
               </div>
 
               {/* Chat Input */}
-              <div className="chat-input-bar">
+              <div className="chat-input-bar" role="form" aria-label="Send a message">
                 <div className="chat-input-wrapper">
+                  <label htmlFor="chat-input" className="sr-only">
+                    Type your query in English or Hindi
+                  </label>
                   <input
+                    id="chat-input"
                     type="text"
                     className="chat-input"
-                    placeholder="Type your query... (e.g. 'How do I update my Aadhaar?' or 'सड़क टूटने की शिकायत दर्ज करें')"
+                    placeholder="Type your query… (e.g. 'How do I update my Aadhaar?' or 'सड़क टूटने की शिकायत दर्ज करें')"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSendMessage();
                     }}
                     disabled={isLoading}
+                    aria-label="Chat message input — type in English or Hindi"
+                    aria-describedby="chat-hint"
                   />
+                  <span id="chat-hint" className="sr-only">
+                    Press Enter or the Send button to submit your query. You can write in English or Hindi.
+                  </span>
                 </div>
-                <button 
-                  className="send-btn" 
+                <button
+                  className="send-btn"
                   onClick={() => handleSendMessage()}
                   disabled={isLoading || !inputValue.trim()}
+                  aria-label={isLoading ? 'Sending message, please wait' : 'Send message'}
                 >
-                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  {isLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Send size={18} aria-hidden="true" />}
                 </button>
               </div>
             </div>
           )}
 
           {activeTab === 'track' && (
-            <div className="card tracker-card">
+            <div
+              className="card tracker-card"
+              id="panel-track"
+              role="tabpanel"
+              aria-labelledby="tab-track"
+            >
               <div className="tracker-title-section">
                 <h2>शिकायत की स्थिति जांचें • Track Complaint Status</h2>
                 <p>Enter your 6-character Tracking ID (e.g. SB-XXXXXX) to view status in real time.</p>
               </div>
 
-              <form id="search-form" className="search-box" onSubmit={handleSearchComplaint}>
+              <form id="search-form" className="search-box" onSubmit={handleSearchComplaint} aria-label="Search complaint by tracking ID">
+                <label htmlFor="search-input" className="sr-only">Enter your Complaint Tracking ID</label>
                 <input
+                  id="search-input"
                   type="text"
                   placeholder="Enter Tracking ID (e.g., SB-8A2D7P)"
                   className="search-input"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
+                  aria-label="Complaint tracking ID"
+                  aria-describedby="search-hint"
                 />
-                <button type="submit" className="search-btn" disabled={searchLoading}>
-                  {searchLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                <span id="search-hint" className="sr-only">Format: SB- followed by 6 uppercase letters and numbers</span>
+                <button type="submit" className="search-btn" disabled={searchLoading} aria-label={searchLoading ? 'Searching, please wait' : 'Search for complaint status'}>
+                  {searchLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Search size={18} aria-hidden="true" />}
                   <span>खोजें (Search)</span>
                 </button>
               </form>
 
               {searchError && (
-                <div className="not-found-box">
-                  <AlertCircle size={40} style={{ color: '#ef4444', marginBottom: '1rem' }} />
+                <div className="not-found-box" role="alert">
+                  <AlertCircle size={40} style={{ color: '#ef4444', marginBottom: '1rem' }} aria-hidden="true" />
                   <p>{searchError}</p>
                 </div>
               )}
@@ -547,17 +605,33 @@ function App() {
 
                   <div className="details-body">
                     {/* Status timeline */}
-                    <div className="timeline-tracker">
-                      <div className={`timeline-step ${searchResult.status === 'Submitted' || searchResult.status === 'Reviewing' || searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Submitted' ? 'active' : ''}`}>
-                        <div className="step-bubble">1</div>
+                    <div
+                      className="timeline-tracker"
+                      role="list"
+                      aria-label={`Complaint status: ${searchResult.status}`}
+                    >
+                      <div
+                        role="listitem"
+                        className={`timeline-step ${searchResult.status === 'Submitted' || searchResult.status === 'Reviewing' || searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Submitted' ? 'active' : ''}`}
+                        aria-current={searchResult.status === 'Submitted' ? 'step' : undefined}
+                      >
+                        <div className="step-bubble" aria-hidden="true">1</div>
                         <span className="step-label">Submitted</span>
                       </div>
-                      <div className={`timeline-step ${searchResult.status === 'Reviewing' || searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Reviewing' ? 'active' : ''}`}>
-                        <div className="step-bubble">2</div>
+                      <div
+                        role="listitem"
+                        className={`timeline-step ${searchResult.status === 'Reviewing' || searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Reviewing' ? 'active' : ''}`}
+                        aria-current={searchResult.status === 'Reviewing' ? 'step' : undefined}
+                      >
+                        <div className="step-bubble" aria-hidden="true">2</div>
                         <span className="step-label">Reviewing</span>
                       </div>
-                      <div className={`timeline-step ${searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Resolved' ? 'active' : ''}`}>
-                        <div className="step-bubble">3</div>
+                      <div
+                        role="listitem"
+                        className={`timeline-step ${searchResult.status === 'Resolved' ? 'completed' : ''} ${searchResult.status === 'Resolved' ? 'active' : ''}`}
+                        aria-current={searchResult.status === 'Resolved' ? 'step' : undefined}
+                      >
+                        <div className="step-bubble" aria-hidden="true">3</div>
                         <span className="step-label">Resolved</span>
                       </div>
                     </div>
@@ -587,24 +661,27 @@ function App() {
                         <ClipboardList size={14} /> EVALUATOR TOOL: Change Ticket Status
                       </h4>
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button 
-                          className="tab-btn" 
+                        <button
+                          className="tab-btn"
                           style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
                           onClick={() => handleUpdateStatus('Submitted')}
+                          aria-label={`Set complaint ${searchResult.trackingId} status to Submitted`}
                         >
                           Mark Submitted
                         </button>
-                        <button 
-                          className="tab-btn" 
+                        <button
+                          className="tab-btn"
                           style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
                           onClick={() => handleUpdateStatus('Reviewing')}
+                          aria-label={`Set complaint ${searchResult.trackingId} status to Reviewing`}
                         >
                           Mark Reviewing
                         </button>
-                        <button 
-                          className="tab-btn" 
+                        <button
+                          className="tab-btn"
                           style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
                           onClick={() => handleUpdateStatus('Resolved')}
+                          aria-label={`Set complaint ${searchResult.trackingId} status to Resolved`}
                         >
                           Mark Resolved
                         </button>
@@ -617,7 +694,13 @@ function App() {
           )}
 
           {activeTab === 'directory' && (
-            <div className="card" style={{ padding: '2rem' }}>
+            <div
+              className="card"
+              style={{ padding: '2rem' }}
+              id="panel-directory"
+              role="tabpanel"
+              aria-labelledby="tab-directory"
+            >
               <div className="tracker-title-section">
                 <h2>नागरिक सेवा निर्देशिका • Service Directory</h2>
                 <p>Quick lookup guide for required documents and steps for common Indian civic services.</p>
@@ -625,9 +708,9 @@ function App() {
 
               <div className="directory-grid">
                 {servicesList.map((svc, idx) => (
-                  <div key={idx} className="directory-card">
+                  <div key={idx} className="directory-card" aria-label={`Service: ${svc.title}`}>
                     <div className="directory-card-header">
-                      <div className="directory-card-icon" style={{ fontSize: '1.5rem' }}>{svc.icon}</div>
+                      <div className="directory-card-icon" style={{ fontSize: '1.5rem' }} aria-hidden="true">{svc.icon}</div>
                       <div className="directory-card-title">
                         <h3>{svc.title}</h3>
                         <p>{svc.subtitle}</p>
